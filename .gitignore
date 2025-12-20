@@ -1,0 +1,18 @@
+# --- SECURITY: IGNORE KEYS & CONFIGS ---
+backend/config.py
+config.py
+certs/
+backend/certs/
+*.key
+*.crt
+*.csr
+*.pem
+
+# --- SYSTEM & CACHE ---
+api_cache/
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+.env
+.env.local
