@@ -56,7 +56,20 @@ const groupData = (data: any[]) => {
               });
           }
       });
-      competitions[key].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+      
+      // --- FIX 1: STABLE CLIENT-SIDE SORT ---
+      // Prevents UI jitter when start_times are identical
+      competitions[key].sort((a, b) => {
+          const timeDiff = new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+          if (timeDiff !== 0) return timeDiff;
+          
+          // Tie-breaker 1: Alphabetical Event Name
+          const nameDiff = a.name.localeCompare(b.name);
+          if (nameDiff !== 0) return nameDiff;
+
+          // Tie-breaker 2: Stable ID (Last resort)
+          return a.id.localeCompare(b.id);
+      });
   });
 
   return competitions;
@@ -77,7 +90,12 @@ export default function Home() {
       .from('market_feed')
       .select('*')
       .eq('sport', activeSport)
-      .gt('start_time', dbCutoff.toISOString());
+      .gt('start_time', dbCutoff.toISOString())
+      // --- FIX 2: DETERMINISTIC DB RETRIEVAL ---
+      // Locks row order to logic, ignoring physical disk location (Heap)
+      .order('start_time', { ascending: true })
+      .order('event_name', { ascending: true })
+      .order('market_id', { ascending: true }); // Final unique lock
 
     if (!error && data) {
       const now = new Date();
