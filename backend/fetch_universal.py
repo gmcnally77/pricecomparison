@@ -56,6 +56,10 @@ INPLAY_WINDOW_SECONDS = 4 * 3600     # treat matches as "in-play relevant" up to
 PREMATCH_SPY_INTERVAL = 60           # seconds
 INPLAY_SPY_INTERVAL = 5              # seconds
 TTL_INPLAY_SECONDS = 5               # odds api cache TTL for in-play
+
+# --- SNAPSHOT SETTINGS (NEW) ---
+last_snapshot_time = 0
+SNAPSHOT_INTERVAL = 60  # Write history every 60s
 # ---------------------------------------------------
 
 # --- DYNAMIC CACHING SYSTEM ---
@@ -399,6 +403,75 @@ def run_spy():
 def chunker(seq, size):
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
+# === SNAPSHOT LOGIC (NEW) ===
+# ... inside fetch_universal.py ...
+
+def run_snapshot_cycle(active_data):
+    """Writes RICH history (back/lay/sport) for the Trade Ticket engine."""
+    global last_snapshot_time
+    # Throttle: Run every 45s to balance data density vs DB load
+    if time.time() - last_snapshot_time < 45: 
+        return
+
+    if not active_data:
+        return
+
+    logger.info(f"📸 Snapshotting {len(active_data)} markets (High Fidelity)...")
+    
+    snapshot_rows = []
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    for row in active_data:
+        # 1. Safe Price Extraction
+        try:
+            back = float(row.get('back_price') or 0)
+            lay = float(row.get('lay_price') or 0)
+        except (ValueError, TypeError):
+            continue
+
+        # 2. Mid Calculation
+        mid = None
+        if back > 0 and lay > 0:
+            mid = (back + lay) / 2
+        elif back > 0:
+            mid = back
+        elif lay > 0:
+            mid = lay
+            
+        if mid is None or mid <= 1.01: # Ignore junk
+            continue
+
+        # 3. Create Row (Matches new Schema)
+        snapshot_rows.append({
+            "selection_key": f"{row['market_id']}::{row['runner_name']}",
+            "ts": timestamp,
+            "market_id": str(row['market_id']),
+            "sport": row.get('sport', 'Unknown'),
+            "event_name": row.get('event_name', ''),
+            "runner_name": row.get('runner_name', ''),
+            "back_price": back,
+            "lay_price": lay,
+            "mid_price": mid,
+            "volume": float(row.get('volume') or 0)
+        })
+
+    if snapshot_rows:
+        try:
+            # Chunked Insert
+            for i in range(0, len(snapshot_rows), 100):
+                chunk = snapshot_rows[i:i+100]
+                supabase.table('market_snapshots').insert(chunk).execute()
+            
+            # Prune old data (Keep last 24h)
+            if time.time() % 100 < 5: # 5% chance per cycle
+                old_cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+                supabase.table('market_snapshots').delete().lt('ts', old_cutoff).execute()
+                
+            last_snapshot_time = time.time()
+        except Exception as e:
+            logger.error(f"Snapshot Error: {e}")
+# =============================
+
 def fetch_betfair():
     if not trading.session_token:
         try:
@@ -504,6 +577,10 @@ def fetch_betfair():
             final_data = list(best_price_map.values())
             supabase.table('market_feed').upsert(final_data, on_conflict='market_id, runner_name').execute()
             logger.info(f"⚡ Synced {len(final_data)} items (High Volume filtered).")
+            
+            # --- TRIGGER SNAPSHOT ---
+            run_snapshot_cycle(final_data)
+            
         except Exception as e:
             logger.error(f"Database Error: {e}")
 

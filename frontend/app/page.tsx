@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
 import { Search, RefreshCw, TrendingUp, Clock, Radio, Lock, Swords, Trophy, Dribbble, AlertCircle, Activity } from 'lucide-react';
+import SteamersPanel from '@/components/SteamersPanel'; 
 
 const SPORTS = [
   { id: 'MMA', label: 'MMA', icon: <Swords size={16} /> },
@@ -9,10 +10,31 @@ const SPORTS = [
   { id: 'Basketball', label: 'Basketball', icon: <Dribbble size={16} /> },
 ];
 
+// HELPER: Normalize strings for strict comparison
+const normalizeKey = (str: string) => str ? str.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+
 const groupData = (data: any[]) => {
   const competitions: Record<string, any[]> = {};
 
   data.forEach(row => {
+    // --- 1. STRICT 2-WAY NORMALIZATION (FILTERS JUNK) ---
+    const sportKey = row.sport || '';
+    const isTwoWaySport = ['NFL', 'NBA', 'Basketball', 'MMA', 'American Football', 'UFC'].some(s => sportKey.includes(s));
+
+    // Derive Participants from Event Name (e.g. "Chiefs v Raiders")
+    const participants = row.event_name ? row.event_name.split(/\s+v\s+|\s+@\s+|\s+vs\.?\s+/i) : [];
+
+    if (isTwoWaySport && participants.length === 2) {
+        const p1 = normalizeKey(participants[0]);
+        const p2 = normalizeKey(participants[1]);
+        const runner = normalizeKey(row.runner_name);
+
+        // DROP anything that is not Home or Away (Kills "Draw", "Tie", junk)
+        if (runner !== p1 && runner !== p2) {
+            return; 
+        }
+    }
+
     const compName = row.competition || 'Other';
     if (!competitions[compName]) competitions[compName] = [];
     
@@ -38,7 +60,6 @@ const groupData = (data: any[]) => {
             lay: row.lay_price
         },
         bookmakers: {
-            // MAP DIRECTLY FROM DB COLUMNS
             pinnacle: row.price_pinnacle, 
             bet365: row.price_bet365, 
             paddypower: row.price_paddy
@@ -49,25 +70,43 @@ const groupData = (data: any[]) => {
   Object.keys(competitions).forEach(key => {
       competitions[key].forEach(market => {
           if (market.selections && market.selections.length > 0) {
+              
+              // --- 2. STABLE SORT (FIXES FLIPPING) ---
               market.selections.sort((a: any, b: any) => {
-                  const priceA = (a.exchange.back > 1) ? a.exchange.back : 1000;
-                  const priceB = (b.exchange.back > 1) ? b.exchange.back : 1000;
-                  return priceA - priceB;
+                  // Re-derive canonical order from Event Name
+                  const participants = market.name
+                    ? market.name.split(/\s+v\s+|\s+@\s+|\s+vs\.?\s+/i).map((p: string) => normalizeKey(p))
+                    : [];
+                  
+                  const keyA = normalizeKey(a.name);
+                  const keyB = normalizeKey(b.name);
+                  
+                  const idxA = participants.indexOf(keyA);
+                  const idxB = participants.indexOf(keyB);
+
+                  // Primary: Position in Event Name (Home vs Away)
+                  if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                  
+                  // Secondary: Keep Teams above "Draw" (if one leaks through)
+                  if (idxA !== -1) return -1;
+                  if (idxB !== -1) return 1;
+
+                  // Fallback: Alphabetical (Deterministic)
+                  return a.name.localeCompare(b.name);
               });
+              // --- END STABLE SORT ---
+
           }
       });
       
-      // --- FIX 1: STABLE CLIENT-SIDE SORT ---
-      // Prevents UI jitter when start_times are identical
+      // Sort Competitions by Time -> Name -> ID
       competitions[key].sort((a, b) => {
           const timeDiff = new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
           if (timeDiff !== 0) return timeDiff;
           
-          // Tie-breaker 1: Alphabetical Event Name
           const nameDiff = a.name.localeCompare(b.name);
           if (nameDiff !== 0) return nameDiff;
 
-          // Tie-breaker 2: Stable ID (Last resort)
           return a.id.localeCompare(b.id);
       });
   });
@@ -79,7 +118,6 @@ export default function Home() {
   const [activeSport, setActiveSport] = useState('MMA');
   const [competitions, setCompetitions] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
   const fetchPrices = async () => {
@@ -91,11 +129,9 @@ export default function Home() {
       .select('*')
       .eq('sport', activeSport)
       .gt('start_time', dbCutoff.toISOString())
-      // --- FIX 2: DETERMINISTIC DB RETRIEVAL ---
-      // Locks row order to logic, ignoring physical disk location (Heap)
       .order('start_time', { ascending: true })
       .order('event_name', { ascending: true })
-      .order('market_id', { ascending: true }); // Final unique lock
+      .order('market_id', { ascending: true });
 
     if (!error && data) {
       const now = new Date();
@@ -160,6 +196,9 @@ export default function Home() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-8">
+        
+        <SteamersPanel activeSport={activeSport} />
+
         {loading && Object.keys(competitions).length === 0 && <div className="flex justify-center py-20"><RefreshCw size={40} className="animate-spin text-blue-500" /></div>}
 
         {Object.entries(competitions).map(([compName, markets]) => (
@@ -206,8 +245,8 @@ export default function Home() {
                                                 <span className="text-[9px] text-orange-900 font-bold uppercase mb-0.5">Pin</span>
                                                 <span className="text-lg font-mono font-bold text-white leading-none">{formatPrice(runner.bookmakers.pinnacle)}</span>
                                             </div>
-                                            {/* LADBROKES (Replaces Bet365) - Grey Styling */}
-                                            <div className="w-16 py-2 rounded-lg text-center bg-gray-600 border border-gray-500 flex flex-col justify-center h-[52px] flex-shrink-0">
+                                            {/* LADBROKES (Grey) */}
+                                            <div className="w-16 py-2 rounded-lg text-center bg-[#4a4a4a] border border-[#3a3a3a] flex flex-col justify-center h-[52px] flex-shrink-0">
                                             <span className="text-[9px] text-gray-200 font-bold uppercase mb-0.5">Ladbrokes</span>
                                             <span className="text-lg font-mono font-bold text-white leading-none">{formatPrice(runner.bookmakers.bet365)}</span>
                                             </div>
