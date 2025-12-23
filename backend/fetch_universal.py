@@ -28,11 +28,17 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # --- IMPORT CONFIG ---
 try:
-    from sports_config import SPORTS_CONFIG, ALIAS_MAP
+    from sports_config import SPORTS_CONFIG, ALIAS_MAP, SCOPE_MODE
 except ImportError:
     logger.error("Could not import sports_config.py")
     SPORTS_CONFIG = []
     ALIAS_MAP = {}
+    SCOPE_MODE = ""
+
+# --- SCOPE GUARD: RUNTIME FILTER ---
+if SCOPE_MODE == "NBA_PREMATCH_ML":
+    logger.info("🔒 SCOPE_MODE ACTIVE: NBA_PREMATCH_ML (Filtering to Basketball Only)")
+    SPORTS_CONFIG = [s for s in SPORTS_CONFIG if s['name'] == 'Basketball']
 
 # --- SETUP ---
 supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
@@ -301,6 +307,10 @@ def run_spy():
                     continue
                 seconds = (dt - now_utc).total_seconds()
 
+                # SCOPE GUARD: NBA_PREMATCH_ML -> Skip Live
+                if SCOPE_MODE == "NBA_PREMATCH_ML" and seconds <= 0:
+                    continue
+
                 # already started but within the in-play window -> urgent
                 if seconds <= 0 and abs(seconds) <= INPLAY_WINDOW_SECONDS:
                     deltas.append(0)
@@ -310,6 +320,10 @@ def run_spy():
 
             if deltas:
                 min_seconds_away = min(deltas)
+
+        # FALLBACK: If schedule empty BUT active rows exist, force safe refresh (600s TTL)
+        if min_seconds_away == 999999 and any(r['sport'] == sport['name'] for r in active_rows):
+            min_seconds_away = 7200
 
         if min_seconds_away == 0:
             ttl = TTL_INPLAY_SECONDS      # Live (60s)
@@ -453,9 +467,9 @@ def run_spy():
                 if p is not None:
                     updates[row_id]['price_pinnacle'] = p
 
-                p = find_price(get_h2h(ladbrokes_book), raw_name)
-                if p is not None:
-                    updates[row_id]['price_bet365'] = p  # Ladbrokes price (legacy field name)
+                price_ladbrokes = find_price(get_h2h(ladbrokes_book), raw_name)
+                if price_ladbrokes is not None:
+                    updates[row_id]['price_bet365'] = price_ladbrokes
 
                 p = find_price(get_h2h(paddy_book), raw_name)
                 if p is not None:
@@ -591,6 +605,10 @@ def fetch_betfair():
                 market_books = trading.betting.list_market_book(market_ids=batch, price_projection=price_projection)
 
                 for book in market_books:
+                    # SCOPE GUARD: NBA_PREMATCH_ML -> Skip In-Play
+                    if SCOPE_MODE == "NBA_PREMATCH_ML" and book.inplay:
+                        continue
+
                     market_info = next((m for m in markets if m.market_id == book.market_id), None)
                     if not market_info:
                         continue

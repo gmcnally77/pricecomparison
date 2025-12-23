@@ -1,7 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
-import { TrendingUp, TrendingDown, Activity, DollarSign, ArrowRight, Zap, Clock } from 'lucide-react';
+import { Zap, Clock, ArrowRight } from 'lucide-react';
+
+// --- CONFIG ---
+const STEAMER_TEST_MODE = false;
+// --------------
 
 interface Mover {
   selection_key: string;
@@ -21,9 +25,13 @@ interface Mover {
 
 interface Props {
   activeSport: string;
+  onSteamersChange?: (
+    events: Set<string>, 
+    signals: Map<string, any>
+  ) => void;
 }
 
-export default function SteamersPanel({ activeSport }: Props) {
+export default function SteamersPanel({ activeSport, onSteamersChange }: Props) {
   const [movers, setMovers] = useState<Mover[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -33,6 +41,7 @@ export default function SteamersPanel({ activeSport }: Props) {
           time_window_minutes: 15 
       });
       if (data) setMovers(data);
+      
     } catch (e) {
       console.error(e);
     } finally {
@@ -46,16 +55,46 @@ export default function SteamersPanel({ activeSport }: Props) {
     return () => clearInterval(interval);
   }, []);
 
-  // 1. FILTER BY SPORT (Fixes Bug #1)
-  // Logic: Show if Active is "All" (if you have that tab) OR if matches current sport
-  const filteredMovers = movers.filter(m => {
-      // Normalize comparison (optional safety)
-      if (!activeSport || activeSport === 'All') return true;
+  // 1. FILTER & DEDUPLICATE (IMMUTABLE RULE: NBA PRE-MATCH)
+  const filteredMovers = (() => {
+      let candidates = movers.filter(m => {
+          if (!activeSport || activeSport === 'All') return true;
+          return m.sport === activeSport;
+      });
+
+      if (activeSport === 'Basketball' || activeSport === 'NBA') {
+          const uniqueMap = new Map();
+          candidates.sort((a, b) => Math.abs(b.pct_move) - Math.abs(a.pct_move));
+          candidates.forEach(m => {
+              const key = m.event_name; 
+              if (!uniqueMap.has(key)) uniqueMap.set(key, m);
+          });
+          return Array.from(uniqueMap.values());
+      }
+      return candidates;
+  })();
+
+  // 2. NOTIFY PARENT
+  useEffect(() => {
+    if (onSteamersChange) {
+      const uniqueEvents = new Set(filteredMovers.map(m => m.event_name));
+      const signalMap = new Map<string, any>();
       
-      // Handle "NFL" vs "American Football" naming mismatches if they exist in your DB
-      // For now, strict match based on your existing schema
-      return m.sport === activeSport;
-  });
+      filteredMovers.forEach(m => {
+          // ✅ TEST MODE: Lower threshold to 0.1%
+          const threshold = STEAMER_TEST_MODE ? 0.001 : 0.02;
+
+          if (Math.abs(m.pct_move) >= threshold) {
+              signalMap.set(m.runner_name, { 
+                  label: m.label, 
+                  pct: m.pct_move 
+              });
+          }
+      });
+
+      onSteamersChange(uniqueEvents, signalMap);
+    }
+  }, [filteredMovers, onSteamersChange]);
 
   if (loading || filteredMovers.length === 0) return null;
 
@@ -66,7 +105,9 @@ export default function SteamersPanel({ activeSport }: Props) {
             <h3 className="text-white font-bold text-sm flex items-center gap-2">
                 <Zap className="text-yellow-400 fill-yellow-400" size={16} /> 
                 SMART MONEY 
-                <span className="text-slate-500 font-normal text-xs ml-1">({activeSport} • 15m Window)</span>
+                <span className="text-slate-500 font-normal text-xs ml-1">
+                    ({activeSport} • 15m Window)
+                </span>
             </h3>
         </div>
         
@@ -77,11 +118,9 @@ export default function SteamersPanel({ activeSport }: Props) {
                 const trendColor = isSteamer ? 'text-blue-400' : 'text-pink-400';
                 const borderColor = isSteamer ? 'border-blue-500/20' : 'border-pink-500/20';
                 
-                // Safe Number Formatting
                 const fmtPrice = (p: number) => (p ? p.toFixed(2) : '-');
                 const pctDisplay = Math.abs(m.pct_move * 100).toFixed(1);
                 
-                // Direction Logic
                 const oldPrice = isSteamer ? m.back_then : m.lay_then;
                 const newPrice = isSteamer ? m.back_now : m.lay_now;
 
@@ -104,27 +143,39 @@ export default function SteamersPanel({ activeSport }: Props) {
                                 </span>
                             </div>
                             <div className="text-right">
-                                <span className="text-[10px] text-slate-600 uppercase font-mono block">{m.sport}</span>
+                                <span className="text-[10px] text-slate-600 uppercase font-mono block">
+                                    {m.sport}
+                                </span>
                                 <span className="text-[10px] text-slate-500 flex items-center justify-end gap-1 mt-0.5">
                                     <Clock size={10} /> 15m
                                 </span>
                             </div>
                         </div>
 
-                        {/* ROW 2: PRICE ACTION (THE TRADE) */}
+                        {/* ROW 2: PRICE ACTION */}
                         <div className="flex items-center justify-between mb-3 px-1">
                             <div className="flex flex-col">
-                                <span className="text-[10px] text-slate-500 uppercase font-medium">Price Taken</span>
+                                <span className="text-[10px] text-slate-500 uppercase font-medium">
+                                    Price Taken
+                                </span>
                                 <div className="flex items-center gap-2 text-sm">
-                                    <span className="text-slate-500 line-through decoration-slate-600">{fmtPrice(oldPrice)}</span>
+                                    <span className="text-slate-500 line-through decoration-slate-600">
+                                        {fmtPrice(oldPrice)}
+                                    </span>
                                     <ArrowRight size={12} className="text-slate-600" />
-                                    <span className={`font-mono font-bold text-lg ${trendColor}`}>{fmtPrice(newPrice)}</span>
-                                    <span className={`text-xs font-medium ml-1 ${trendColor}`}>({pctDisplay}%)</span>
+                                    <span className={`font-mono font-bold text-lg ${trendColor}`}>
+                                        {fmtPrice(newPrice)}
+                                    </span>
+                                    <span className={`text-xs font-medium ml-1 ${trendColor}`}>
+                                        ({pctDisplay}%)
+                                    </span>
                                 </div>
                             </div>
                             
                             <div className="text-right flex flex-col items-end">
-                                <span className="text-[10px] text-slate-500 uppercase font-medium">Matched</span>
+                                <span className="text-[10px] text-slate-500 uppercase font-medium">
+                                    Matched
+                                </span>
                                 <span className="font-mono text-white text-sm flex items-center gap-0.5">
                                     <span className="text-slate-600">+£</span>
                                     {(m.vol_delta / 1000).toFixed(1)}k
@@ -132,7 +183,7 @@ export default function SteamersPanel({ activeSport }: Props) {
                             </div>
                         </div>
 
-                        {/* ROW 3: EXECUTION (CURRENT STATE) */}
+                        {/* ROW 3: EXECUTION */}
                         <div className="bg-[#0B1120] rounded p-2 flex items-center justify-between text-xs">
                             <div className="flex items-center gap-3">
                                 <div className="flex flex-col items-center min-w-[40px]">
@@ -153,7 +204,6 @@ export default function SteamersPanel({ activeSport }: Props) {
                                 <span className="text-[9px] text-slate-600 italic mt-0.5">{m.status}</span>
                             </div>
                         </div>
-
                     </div>
                 );
             })}

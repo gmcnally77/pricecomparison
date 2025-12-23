@@ -1,4 +1,5 @@
 # backend/sports_config.py
+import os
 
 # This list controls which leagues the Universal Engine tracks.
 #
@@ -9,8 +10,6 @@
 #    - 6423     = American Football (All)
 #    - 26420387 = MMA (All)
 #    - 1        = Soccer (All)
-
-# backend/sports_config.py
 
 SPORTS_CONFIG = [
     # --- MMA (WORKING) ---
@@ -96,7 +95,6 @@ ALIAS_MAP = {
     "utsa": ["texas-sanantonio", "utsaroadrunners", "utsa-roadrunners", "texassanantonio"],
     "floridainternationalpanthers": ["fiu"],
     "minnesota": ["minnesotagoldengophers", "minnesota"],
-    "newmexico": ["newmexicolobos"],
     "utsa": ["texas-sanantonio", "utsaroadrunners", "utsa"],
     "dallas": ["dallascowboys"],
     "unlv": ["nevada-lasvegas", "nevadalasvegas", "unlvrunninrebels"],
@@ -120,3 +118,11 @@ ALIAS_MAP = {
     "illinoisstate": ["illstate", "ilstate", "illinoisst", "illinoisstredbirds"],
     "villanova": ["villanovawildcats", "nova"],
 }
+
+# --- SCOPE GUARD (NEW) ---
+SCOPE_MODE = os.getenv("SCOPE_MODE", "")
+
+if SCOPE_MODE == "NBA_PREMATCH_ML":
+    # 1. Filter Sports to NBA Only
+    SPORTS_CONFIG = [s for s in SPORTS_CONFIG if s["name"] == "Basketball"]
+    print(">> 🔒 SCOPE_MODE ACTIVE: NBA_PREMATCH_ML (Filtering Sports)")

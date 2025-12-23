@@ -1,8 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../utils/supabase';
-import { Search, RefreshCw, TrendingUp, Clock, Radio, Lock, Swords, Trophy, Dribbble, AlertCircle, Activity } from 'lucide-react';
+import { RefreshCw, TrendingUp, Clock, Radio, Lock, Unlock, Swords, Trophy, Dribbble, AlertCircle } from 'lucide-react';
 import SteamersPanel from '@/components/SteamersPanel'; 
+
+// --- CONFIG ---
+const STEAMER_TEST_MODE = false;
+// --------------
 
 const SPORTS = [
   { id: 'MMA', label: 'MMA', icon: <Swords size={16} /> },
@@ -10,29 +14,36 @@ const SPORTS = [
   { id: 'Basketball', label: 'Basketball', icon: <Dribbble size={16} /> },
 ];
 
-// HELPER: Normalize strings for strict comparison
-const normalizeKey = (str: string) => str ? str.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+// HELPER: Equality checks
+const areSetsEqual = (a: Set<string>, b: Set<string>) => 
+  a.size === b.size && [...a].every(x => b.has(x));
+
+const areMapsEqual = (a: Map<string, any>, b: Map<string, any>) =>
+  a.size === b.size &&
+  [...a].every(([k, v]) => JSON.stringify(b.get(k)) === JSON.stringify(v));
+
+// HELPER: Normalize strings
+const normalizeKey = (str: string) => 
+  str ? str.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 
 const groupData = (data: any[]) => {
   const competitions: Record<string, any[]> = {};
 
   data.forEach(row => {
-    // --- 1. STRICT 2-WAY NORMALIZATION (FILTERS JUNK) ---
     const sportKey = row.sport || '';
-    const isTwoWaySport = ['NFL', 'NBA', 'Basketball', 'MMA', 'American Football', 'UFC'].some(s => sportKey.includes(s));
+    const isTwoWaySport = ['NFL', 'NBA', 'Basketball', 'MMA', 'American Football', 'UFC']
+        .some(s => sportKey.includes(s));
 
-    // Derive Participants from Event Name (e.g. "Chiefs v Raiders")
-    const participants = row.event_name ? row.event_name.split(/\s+v\s+|\s+@\s+|\s+vs\.?\s+/i) : [];
+    const participants = row.event_name 
+        ? row.event_name.split(/\s+v\s+|\s+@\s+|\s+vs\.?\s+/i) 
+        : [];
 
     if (isTwoWaySport && participants.length === 2) {
         const p1 = normalizeKey(participants[0]);
         const p2 = normalizeKey(participants[1]);
         const runner = normalizeKey(row.runner_name);
 
-        // DROP anything that is not Home or Away (Kills "Draw", "Tie", junk)
-        if (runner !== p1 && runner !== p2) {
-            return; 
-        }
+        if (runner !== p1 && runner !== p2) return; 
     }
 
     const compName = row.competition || 'Other';
@@ -61,7 +72,7 @@ const groupData = (data: any[]) => {
         },
         bookmakers: {
             pinnacle: row.price_pinnacle, 
-            bet365: row.price_bet365, 
+            ladbrokes: row.price_bet365,
             paddypower: row.price_paddy
         }
     });
@@ -70,43 +81,30 @@ const groupData = (data: any[]) => {
   Object.keys(competitions).forEach(key => {
       competitions[key].forEach(market => {
           if (market.selections && market.selections.length > 0) {
-              
-              // --- 2. STABLE SORT (FIXES FLIPPING) ---
               market.selections.sort((a: any, b: any) => {
-                  // Re-derive canonical order from Event Name
                   const participants = market.name
-                    ? market.name.split(/\s+v\s+|\s+@\s+|\s+vs\.?\s+/i).map((p: string) => normalizeKey(p))
+                    ? market.name.split(/\s+v\s+|\s+@\s+|\s+vs\.?\s+/i)
+                        .map((p: string) => normalizeKey(p))
                     : [];
                   
                   const keyA = normalizeKey(a.name);
                   const keyB = normalizeKey(b.name);
-                  
                   const idxA = participants.indexOf(keyA);
                   const idxB = participants.indexOf(keyB);
 
-                  // Primary: Position in Event Name (Home vs Away)
                   if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-                  
-                  // Secondary: Keep Teams above "Draw" (if one leaks through)
                   if (idxA !== -1) return -1;
                   if (idxB !== -1) return 1;
-
-                  // Fallback: Alphabetical (Deterministic)
                   return a.name.localeCompare(b.name);
               });
-              // --- END STABLE SORT ---
-
           }
       });
       
-      // Sort Competitions by Time -> Name -> ID
       competitions[key].sort((a, b) => {
           const timeDiff = new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
           if (timeDiff !== 0) return timeDiff;
-          
           const nameDiff = a.name.localeCompare(b.name);
           if (nameDiff !== 0) return nameDiff;
-
           return a.id.localeCompare(b.id);
       });
   });
@@ -115,10 +113,57 @@ const groupData = (data: any[]) => {
 };
 
 export default function Home() {
-  const [activeSport, setActiveSport] = useState('MMA');
+  const [activeSport, setActiveSport] = useState('Basketball'); // ✅ DEFAULT: BASKETBALL
   const [competitions, setCompetitions] = useState<Record<string, any[]>>({});
+  const [steamerEvents, setSteamerEvents] = useState<Set<string>>(new Set());
+  const [steamerSignals, setSteamerSignals] = useState<Map<string, any>>(new Map());
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  
+  // PAYWALL STATE
+  const [isPaid, setIsPaid] = useState(false);
+  
+  useEffect(() => {
+    // Check local storage on mount
+    const paidStatus = typeof window !== 'undefined' && localStorage.getItem('paid') === 'true';
+    setIsPaid(paidStatus);
+  }, []);
+
+  const handleUnlock = () => {
+    localStorage.setItem('paid', 'true');
+    setIsPaid(true);
+  };
+
+  const handleResetPaywall = () => {
+    localStorage.removeItem('paid');
+    setIsPaid(false);
+  };
+
+  const SCOPE_MODE = process.env.NEXT_PUBLIC_SCOPE_MODE || "";
+  const STEAMERS_ONLY_ENABLED = (process.env.NEXT_PUBLIC_STEAMERS_ONLY || "0") === "1";
+
+  // STABLE CALLBACK
+  const handleSteamersChange = useCallback(
+    (newEvents: Set<string>, newSignals: Map<string, any>) => {
+      setSteamerEvents(prev => 
+        areSetsEqual(prev, newEvents) ? prev : newEvents
+      );
+      setSteamerSignals(prev => 
+        areMapsEqual(prev, newSignals) ? prev : newSignals
+      );
+    }, 
+    []
+  );
+
+  const visibleSports = (SCOPE_MODE === "NBA_PREMATCH_ML") 
+    ? SPORTS.filter(s => s.id === 'Basketball') 
+    : SPORTS;
+
+  useEffect(() => {
+    if (SCOPE_MODE === "NBA_PREMATCH_ML" && activeSport !== 'Basketball') {
+      setActiveSport('Basketball');
+    }
+  }, []);
 
   const fetchPrices = async () => {
     const dbCutoff = new Date();
@@ -135,13 +180,21 @@ export default function Home() {
 
     if (!error && data) {
       const now = new Date();
-      // Relaxed to 10 minutes (600s) to prevent aggressive hiding due to clock drift
-      const heartbeatCutoff = new Date(now.getTime() - 600 * 1000); 
+      // Relaxed heartbeat (60m)
+      const heartbeatCutoff = new Date(now.getTime() - 3600 * 1000); 
 
       const activeRows = data.filter((row: any) => {
         if (row.last_updated && new Date(row.last_updated) < heartbeatCutoff) return false;
         if (row.market_status === 'CLOSED' || row.market_status === 'SETTLED') return false;
         return true; 
+      });
+
+      console.log("CORE_DIAG:", { 
+          sport: activeSport, 
+          raw: data.length, 
+          filtered: activeRows.length, 
+          steamers: steamerEvents.size,
+          steamers_enabled: STEAMERS_ONLY_ENABLED
       });
 
       try {
@@ -163,7 +216,9 @@ export default function Home() {
 
   const formatTime = (isoString: string) => {
     if (!isoString) return '';
-    return new Date(isoString).toLocaleDateString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    return new Date(isoString).toLocaleDateString('en-GB', { 
+        weekday: 'short', hour: '2-digit', minute: '2-digit' 
+    });
   };
 
   const formatPrice = (price: number | null) => {
@@ -181,14 +236,29 @@ export default function Home() {
                     <div className="bg-blue-600/20 p-2 rounded-lg border border-blue-500/20">
                         <TrendingUp className="text-blue-500" size={20} />
                     </div>
-                    <span className="block text-lg font-bold text-white">INDEPENDENCE<span className="text-blue-500 text-xs ml-1 tracking-widest">STACK</span></span>
+                    <span className="block text-lg font-bold text-white">
+                        INDEPENDENCE<span className="text-blue-500 text-xs ml-1 tracking-widest">STACK</span>
+                    </span>
+                    {!isPaid && (
+                        <div className="ml-2 bg-red-500/10 border border-red-500/20 p-1.5 rounded text-red-400" title="Free Mode (Limited View)">
+                            <Lock size={14} />
+                        </div>
+                    )}
                 </div>
                 <span className="text-xs font-mono text-slate-500">UPDATED: {lastUpdated}</span>
             </div>
 
             <div className="flex gap-6 border-b border-transparent overflow-x-auto no-scrollbar">
-                {SPORTS.map((sport) => (
-                    <button key={sport.id} onClick={() => setActiveSport(sport.id)} className={`flex items-center gap-2 pb-3 text-sm font-bold transition-all border-b-2 whitespace-nowrap ${activeSport === sport.id ? 'text-white border-blue-500' : 'text-slate-500 border-transparent hover:text-slate-300'}`}>
+                {visibleSports.map((sport) => (
+                    <button 
+                        key={sport.id} 
+                        onClick={() => setActiveSport(sport.id)} 
+                        className={`flex items-center gap-2 pb-3 text-sm font-bold transition-all border-b-2 whitespace-nowrap ${
+                            activeSport === sport.id 
+                                ? 'text-white border-blue-500' 
+                                : 'text-slate-500 border-transparent hover:text-slate-300'
+                        }`}
+                    >
                         {sport.icon} {sport.label}
                     </button>
                 ))}
@@ -198,15 +268,38 @@ export default function Home() {
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-8">
         
-        <SteamersPanel activeSport={activeSport} />
+        <SteamersPanel 
+            activeSport={activeSport} 
+            onSteamersChange={handleSteamersChange} 
+        />
 
-        {loading && Object.keys(competitions).length === 0 && <div className="flex justify-center py-20"><RefreshCw size={40} className="animate-spin text-blue-500" /></div>}
+        {loading && Object.keys(competitions).length === 0 && (
+            <div className="flex justify-center py-20">
+                <RefreshCw size={40} className="animate-spin text-blue-500" />
+            </div>
+        )}
 
-        {Object.entries(competitions).map(([compName, markets]) => (
+        {/* PAYWALL: Initialize global index counter for rendered games */}
+        {(() => { let globalGameIndex = 0; return Object.entries(competitions).map(([compName, markets]) => {
+            const shouldFilter = (activeSport === 'Basketball') && STEAMERS_ONLY_ENABLED && steamerEvents.size > 0;
+            
+            const visibleMarkets = shouldFilter
+                ? markets.filter((m: any) => steamerEvents.has(m.name))
+                : markets;
+
+            if (visibleMarkets.length === 0) return null;
+
+            return (
             <div key={compName}>
-                <h2 className="text-white font-bold text-lg mb-4 flex items-center gap-2"><span className="w-1 h-6 bg-blue-500 rounded-full"></span> {compName}</h2>
+                <h2 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
+                    <span className="w-1 h-6 bg-blue-500 rounded-full"></span> {compName}
+                </h2>
                 <div className="grid grid-cols-1 gap-4">
-                    {markets.map((event: any) => {
+                    {visibleMarkets.map((event: any) => {
+                        // PAYWALL LOGIC: Lock if index >= 3 and not paid
+                        const isPaywalled = !isPaid && globalGameIndex >= 3;
+                        globalGameIndex++; // Increment for next game
+
                         const isSuspended = event.market_status === 'SUSPENDED';
                         const isInPlay = event.in_play;
                         let borderClass = 'border-slate-700/50';
@@ -216,9 +309,15 @@ export default function Home() {
                         return (
                         <div key={event.id} className={`bg-[#161F32] border ${borderClass} rounded-xl overflow-hidden hover:border-blue-500/30 transition-all`}>
                             <div className="bg-[#0f1522] px-4 py-3 border-b border-slate-800 flex justify-between items-center">
-                                <h3 className="text-slate-200 font-bold text-sm truncate max-w-[200px] md:max-w-full">{event.name}</h3>
+                                <h3 className="text-slate-200 font-bold text-sm truncate max-w-[200px] md:max-w-full">
+                                    {event.name}
+                                </h3>
                                 <div className="flex items-center gap-2 text-slate-500 text-xs whitespace-nowrap">
-                                    {isSuspended ? <span className="flex gap-1 text-yellow-500 font-bold"><Lock size={12}/> SUSP</span> : isInPlay ? <span className="flex gap-1 text-red-500 font-bold"><Radio size={12}/> LIVE</span> : <span className="flex gap-1"><Clock size={12}/> {formatTime(event.start_time)}</span>}
+                                    {isSuspended 
+                                        ? <span className="flex gap-1 text-yellow-500 font-bold"><Lock size={12}/> SUSP</span> 
+                                        : isInPlay 
+                                            ? <span className="flex gap-1 text-red-500 font-bold"><Radio size={12}/> LIVE</span> 
+                                            : <span className="flex gap-1"><Clock size={12}/> {formatTime(event.start_time)}</span>}
                                 </div>
                             </div>
 
@@ -226,36 +325,141 @@ export default function Home() {
                                 {event.selections?.map((runner: any) => (
                                     <div key={runner.id} className="flex items-center px-4 py-3 gap-4 hover:bg-slate-800/30 transition-colors">
                                         <div className="flex-1 min-w-[120px]">
-                                            <span className="text-white font-medium text-lg block leading-tight">{runner.name}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-white font-medium text-lg block leading-tight">
+                                                    {runner.name}
+                                                </span>
+                                                
+                                                {/* BADGE LOGIC */}
+                                                {(() => {
+                                                    const sigData = steamerSignals.get(runner.name);
+                                                    if (!sigData) return null;
+
+                                                    const now = Date.now();
+                                                    const start = new Date(event.start_time).getTime();
+                                                    const minsUntilStart = (start - now) / 60000;
+                                                    
+                                                    if (minsUntilStart < 10) return null;
+
+                                                    // ✅ TEST MODE: 0 Volume requirement
+                                                    const minVol = STEAMER_TEST_MODE ? 0 : 200;
+                                                    if ((event.volume || 0) < minVol) return null;
+
+                                                    const isSteam = sigData.label === 'STEAMER';
+                                                    const arrow = isSteam ? '↑' : '↓';
+                                                    const pct = Math.abs(sigData.pct * 100).toFixed(1);
+                                                    
+                                                    const baseStyle = "text-[9px] font-bold px-1.5 py-0.5 " +
+                                                                    "rounded border flex items-center gap-1";
+                                                    
+                                                    const colorStyle = isSteam
+                                                        ? "bg-blue-500/20 text-blue-300 border-blue-500/30"
+                                                        : "bg-pink-500/20 text-pink-300 border-pink-500/30";
+
+                                                    return (
+                                                        <span className={`${baseStyle} ${colorStyle}`}>
+                                                            <span>STEAM {arrow}</span>
+                                                            <span className="opacity-80">|</span>
+                                                            <span>{pct}%</span>
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
+
+                                            {/* VALUE CALC: Best Book vs Exchange Mid (Gated >5% Spread) */}
+                                            {(() => {
+                                                const { back, lay } = runner.exchange;
+                                                
+                                                // GATE 1: Strict Liquidity (Must have both Back & Lay)
+                                                if (!back || back <= 1.0 || !lay || lay <= 1.0) return null;
+
+                                                const mid = (back + lay) / 2;
+                                                const spreadPct = ((lay - back) / mid) * 100;
+
+                                                // GATE 2: Max 5% Spread Allowed
+                                                if (spreadPct > 5.0) return null;
+
+                                                const books = [
+                                                    { label: 'Pin', p: runner.bookmakers.pinnacle },
+                                                    { label: 'Lad', p: runner.bookmakers.ladbrokes },
+                                                    { label: 'PP', p: runner.bookmakers.paddypower }
+                                                ];
+                                                
+                                                // Find best book (Max price > 1.0)
+                                                const best = books.reduce((acc, curr) => (curr.p > 1.0 && curr.p > acc.p) ? curr : acc, { label: '', p: 0 });
+                                                
+                                                if (best.p <= 1.0) return null;
+
+                                                const diff = ((best.p / mid) - 1) * 100;
+                                                const sign = diff > 0 ? '+' : '';
+                                                const diffColor = diff > 0 ? 'text-green-400' : 'text-slate-500';
+
+                                                return (
+                                                    <div className="text-[10px] text-slate-500 mt-1 font-mono leading-none">
+                                                        Best: <span className="text-slate-300 font-bold">{best.label} {best.p.toFixed(2)}</span> <span className={diffColor}>({sign}{diff.toFixed(1)}% vs mid)</span>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
-                                        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar mask-gradient">
-                                            <div className="flex gap-1 flex-shrink-0">
-                                                <div className="w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-blue-500/30 flex flex-col justify-center h-[52px]">
+
+                                        {/* PRICE SECTION: Paywall Wrapper */}
+                                        <div className="relative">
+                                            <div className={`flex items-center gap-2 overflow-x-auto no-scrollbar mask-gradient ${isPaywalled ? 'blur-sm select-none opacity-40 pointer-events-none' : ''}`}>
+                                                <div className="flex gap-1 flex-shrink-0">
+                                                    <div className="w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-blue-500/30 flex flex-col justify-center h-[52px]">
                                                     <span className="text-[9px] text-blue-500 font-bold uppercase mb-0.5">Back</span>
-                                                    <span className="text-lg font-mono font-bold text-blue-400 leading-none">{formatPrice(runner.exchange.back)}</span>
+                                                    <span className="text-lg font-mono font-bold text-blue-400 leading-none">
+                                                        {formatPrice(runner.exchange.back)}
+                                                    </span>
                                                 </div>
                                                 <div className="w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-pink-500/30 flex flex-col justify-center h-[52px]">
                                                     <span className="text-[9px] text-pink-500 font-bold uppercase mb-0.5">Lay</span>
-                                                    <span className="text-lg font-mono font-bold text-pink-400 leading-none">{formatPrice(runner.exchange.lay)}</span>
+                                                    <span className="text-lg font-mono font-bold text-pink-400 leading-none">
+                                                        {formatPrice(runner.exchange.lay)}
+                                                    </span>
                                                 </div>
                                             </div>
                                             <div className="w-px h-8 bg-slate-700 mx-1 flex-shrink-0"></div>
                                             
-                                            {/* PINNACLE (Orange) */}
+                                            {/* PINNACLE */}
                                             <div className="w-16 py-2 rounded-lg text-center bg-[#ff7b00] border border-[#e66e00] flex flex-col justify-center h-[52px] flex-shrink-0">
                                                 <span className="text-[9px] text-orange-900 font-bold uppercase mb-0.5">Pin</span>
-                                                <span className="text-lg font-mono font-bold text-white leading-none">{formatPrice(runner.bookmakers.pinnacle)}</span>
+                                                <span className="text-lg font-mono font-bold text-white leading-none">
+                                                    {formatPrice(runner.bookmakers.pinnacle)}
+                                                </span>
                                             </div>
-                                            {/* LADBROKES (Grey) */}
+                                            {/* LADBROKES */}
                                             <div className="w-16 py-2 rounded-lg text-center bg-[#4a4a4a] border border-[#3a3a3a] flex flex-col justify-center h-[52px] flex-shrink-0">
                                             <span className="text-[9px] text-gray-200 font-bold uppercase mb-0.5">Ladbrokes</span>
-                                            <span className="text-lg font-mono font-bold text-white leading-none">{formatPrice(runner.bookmakers.bet365)}</span>
+                                            <span className="text-lg font-mono font-bold text-white leading-none">
+                                                {formatPrice(runner.bookmakers.ladbrokes)}
+                                            </span>
                                             </div>
-                                            {/* PADDY (White/Green) */}
+                                            {/* PADDY */}
                                             <div className="w-16 py-2 rounded-lg text-center bg-white border-2 border-[#206c48] flex flex-col justify-center h-[52px] flex-shrink-0">
                                                 <span className="text-[9px] text-[#206c48] font-bold uppercase mb-0.5">PP</span>
-                                                <span className="text-lg font-mono font-bold text-[#206c48] leading-none">{formatPrice(runner.bookmakers.paddypower)}</span>
+                                                <span className="text-lg font-mono font-bold text-[#206c48] leading-none">
+                                                    {formatPrice(runner.bookmakers.paddypower)}
+                                                </span>
                                             </div>
+                                            </div>
+                                            
+                                            {/* PAYWALL OVERLAY CTA */}
+                                            {isPaywalled && (
+                                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/20 backdrop-blur-[1px] rounded-lg">
+                                                    <div className="flex flex-col items-center gap-1.5 p-2">
+                                                        <span className="text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1">
+                                                            <Lock size={10} className="text-yellow-400" /> Unlock Steamers
+                                                        </span>
+                                                        <button 
+                                                            onClick={handleUnlock}
+                                                            className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-3 py-1 rounded shadow-lg border border-blue-400/50 transition-all flex items-center gap-1"
+                                                        >
+                                                            UNLOCK <Unlock size={10} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
@@ -264,10 +468,14 @@ export default function Home() {
                     )})}
                 </div>
             </div>
-        ))}
+            );
+        }); })()}
         
         {Object.keys(competitions).length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center py-24 text-slate-600"><AlertCircle size={48} className="mb-4 opacity-20" /><p className="text-lg font-medium">No active markets found for {activeSport}</p></div>
+            <div className="flex flex-col items-center justify-center py-24 text-slate-600">
+                <AlertCircle size={48} className="mb-4 opacity-20" />
+                <p className="text-lg font-medium">No active markets found for {activeSport}</p>
+            </div>
         )}
       </div>
     </div>

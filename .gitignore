@@ -16,4 +16,10 @@ __pycache__/
 venv/
 .env
 .env.local
-node_modules
+node_modules.env
+.env
+.env
+.env.local
+node_modules/
+__pycache__/
+.DS_Store
