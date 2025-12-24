@@ -36,8 +36,8 @@ except ImportError:
     SCOPE_MODE = ""
 
 # --- SCOPE GUARD: RUNTIME FILTER ---
-if SCOPE_MODE == "NBA_PREMATCH_ML":
-    logger.info("🔒 SCOPE_MODE ACTIVE: NBA_PREMATCH_ML (Filtering to Basketball Only)")
+if SCOPE_MODE.startswith("NBA_PREMATCH_ML"):
+    logger.info(f"🔒 SCOPE_MODE ACTIVE: {SCOPE_MODE} (Filtering to Basketball Only)")
     SPORTS_CONFIG = [s for s in SPORTS_CONFIG if s['name'] == 'Basketball']
 
 # --- SETUP ---
@@ -211,6 +211,21 @@ def has_inplay_markets():
 # --- MAIN ENGINE ---
 def run_spy():
     logger.info("🕵️  Running Spy (Forensic Mode)...")
+    
+    # --- CLEANUP STEP (Pre-match Strict Mode) ---
+    if SCOPE_MODE.startswith("NBA_PREMATCH_ML"):
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            # 1. Close started games
+            supabase.table('market_feed').update({'market_status': 'CLOSED'}) \
+                .lt('start_time', now_iso).eq('market_status', 'OPEN').execute()
+            # 2. Close explicitly marked in-play games
+            supabase.table('market_feed').update({'market_status': 'CLOSED'}) \
+                .eq('in_play', True).eq('market_status', 'OPEN').execute()
+        except Exception as e:
+            logger.error(f"Cleanup Error: {e}")
+    # --------------------------------------------
+
     tracker.__init__()
 
     try:
@@ -308,7 +323,7 @@ def run_spy():
                 seconds = (dt - now_utc).total_seconds()
 
                 # SCOPE GUARD: NBA_PREMATCH_ML -> Skip Live
-                if SCOPE_MODE == "NBA_PREMATCH_ML" and seconds <= 0:
+                if SCOPE_MODE.startswith("NBA_PREMATCH_ML") and seconds <= 0:
                     continue
 
                 # already started but within the in-play window -> urgent
@@ -606,7 +621,7 @@ def fetch_betfair():
 
                 for book in market_books:
                     # SCOPE GUARD: NBA_PREMATCH_ML -> Skip In-Play
-                    if SCOPE_MODE == "NBA_PREMATCH_ML" and book.inplay:
+                    if SCOPE_MODE.startswith("NBA_PREMATCH_ML") and book.inplay:
                         continue
 
                     market_info = next((m for m in markets if m.market_id == book.market_id), None)

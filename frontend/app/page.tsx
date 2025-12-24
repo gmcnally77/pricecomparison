@@ -155,12 +155,12 @@ export default function Home() {
     []
   );
 
-  const visibleSports = (SCOPE_MODE === "NBA_PREMATCH_ML") 
+  const visibleSports = SCOPE_MODE.startsWith("NBA_PREMATCH_ML") 
     ? SPORTS.filter(s => s.id === 'Basketball') 
     : SPORTS;
 
   useEffect(() => {
-    if (SCOPE_MODE === "NBA_PREMATCH_ML" && activeSport !== 'Basketball') {
+    if (SCOPE_MODE.startsWith("NBA_PREMATCH_ML") && activeSport !== 'Basketball') {
       setActiveSport('Basketball');
     }
   }, []);
@@ -186,6 +186,10 @@ export default function Home() {
       const activeRows = data.filter((row: any) => {
         if (row.last_updated && new Date(row.last_updated) < heartbeatCutoff) return false;
         if (row.market_status === 'CLOSED' || row.market_status === 'SETTLED') return false;
+        
+        // SCOPE GUARD: Strict Pre-match
+        if (SCOPE_MODE.startsWith('NBA_PREMATCH_ML') && (row.in_play || new Date(row.start_time) <= now)) return false;
+        
         return true; 
       });
 
@@ -245,7 +249,7 @@ export default function Home() {
                         </div>
                     )}
                 </div>
-                <span className="text-xs font-mono text-slate-500">UPDATED: {lastUpdated}</span>
+                <span className="text-xs font-mono text-slate-500 hidden sm:block">UPDATED: {lastUpdated}</span>
             </div>
 
             <div className="flex gap-6 border-b border-transparent overflow-x-auto no-scrollbar">
@@ -309,7 +313,7 @@ export default function Home() {
                         return (
                         <div key={event.id} className={`bg-[#161F32] border ${borderClass} rounded-xl overflow-hidden hover:border-blue-500/30 transition-all`}>
                             <div className="bg-[#0f1522] px-4 py-3 border-b border-slate-800 flex justify-between items-center">
-                                <h3 className="text-slate-200 font-bold text-sm truncate max-w-[200px] md:max-w-full">
+                                <h3 className="text-slate-200 font-bold text-sm truncate flex-1 min-w-0 pr-2">
                                     {event.name}
                                 </h3>
                                 <div className="flex items-center gap-2 text-slate-500 text-xs whitespace-nowrap">
@@ -403,7 +407,7 @@ export default function Home() {
                                         </div>
 
                                         {/* PRICE SECTION: Paywall Wrapper */}
-                                        <div className="relative">
+                                        <div className="relative w-[58%] md:w-auto flex-shrink-0">
                                             <div className={`flex items-center gap-2 overflow-x-auto no-scrollbar mask-gradient ${isPaywalled ? 'blur-sm select-none opacity-40 pointer-events-none' : ''}`}>
                                                 <div className="flex gap-1 flex-shrink-0">
                                                     <div className="w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-blue-500/30 flex flex-col justify-center h-[52px]">
