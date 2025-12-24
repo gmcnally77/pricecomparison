@@ -277,6 +277,7 @@ export default function Home() {
                 </p>
                 <p className="text-[10px] text-slate-500">
                     These are games where bookmakers are mispriced versus the exchange.
+                    <span className="block sm:inline sm:ml-2 text-slate-600 italic">Updated continuously until tip-off.</span>
                 </p>
             </div>
 
@@ -503,6 +504,9 @@ export default function Home() {
                                                         <span className="text-[9px] text-slate-400 font-medium mt-1">
                                                             Pre-match only. No live chasing.
                                                         </span>
+                                                        <span className="text-[9px] text-slate-600 mt-0.5">
+                                                            Prices move fast. Missed lines are not replayed.
+                                                        </span>
                                                     </div>
                                                 </div>
                                             )}
@@ -524,6 +528,10 @@ export default function Home() {
                 <p className="text-lg font-medium">No active markets found for {activeSport}</p>
             </div>
         )}
+
+        <div className="text-center pt-8 pb-2 opacity-50">
+            <p className="text-[10px] text-slate-700">No guarantees. This shows price discrepancies — not predictions.</p>
+        </div>
       </div>
 
       {/* PAYMENT MODAL */}
