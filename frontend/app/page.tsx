@@ -320,7 +320,17 @@ export default function Home() {
                         else if (isInPlay) borderClass = 'border-red-500/50';
 
                         return (
-                        <div key={event.id} className={`bg-[#161F32] border ${borderClass} rounded-xl overflow-hidden hover:border-blue-500/30 transition-all`}>
+                        <div key={event.id} className="space-y-4">
+                            {!isPaid && globalGameIndex === 4 && (
+                                <div className="flex items-center gap-4 pt-2">
+                                    <div className="h-px bg-slate-700 flex-1"></div>
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap">
+                                        Free Preview — Full Access Below
+                                    </span>
+                                    <div className="h-px bg-slate-700 flex-1"></div>
+                                </div>
+                            )}
+                        <div className={`bg-[#161F32] border ${borderClass} rounded-xl overflow-hidden hover:border-blue-500/30 transition-all`}>
                             <div className="bg-[#0f1522] px-4 py-3 border-b border-slate-800 flex justify-between items-center">
                                 <h3 className="text-slate-200 font-bold text-sm truncate flex-1 min-w-0 pr-2">
                                     {event.name}
@@ -480,6 +490,7 @@ export default function Home() {
                                     </div>
                                 ))}
                             </div>
+                        </div>
                         </div>
                     )})}
                 </div>
