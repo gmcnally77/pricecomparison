@@ -256,8 +256,8 @@ export default function Home() {
             
             {/* SUB-LABEL */}
             <div className="mb-4 -mt-2">
-                <p className="text-[10px] md:text-xs text-slate-400 font-medium tracking-wide uppercase">
-                    Pre-match only <span className="text-slate-600 px-1">•</span> Moneyline <span className="text-slate-600 px-1">•</span> Best price vs exchange
+                <p className="text-[10px] md:text-xs text-slate-400 font-medium tracking-wide">
+                    Find bookmaker prices beating the exchange before tip-off.
                 </p>
             </div>
 
