@@ -122,6 +122,7 @@ export default function Home() {
   
   // PAYWALL STATE
   const [isPaid, setIsPaid] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   
   useEffect(() => {
     // Check local storage on mount
@@ -130,8 +131,13 @@ export default function Home() {
   }, []);
 
   const handleUnlock = () => {
+    setShowPaymentModal(true);
+  };
+
+  const handleConfirmPayment = () => {
     localStorage.setItem('paid', 'true');
     setIsPaid(true);
+    setShowPaymentModal(false);
   };
 
   const handleResetPaywall = () => {
@@ -506,6 +512,52 @@ export default function Home() {
             </div>
         )}
       </div>
+
+      {/* PAYMENT MODAL */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-[#161F32] border border-blue-500/30 rounded-xl p-6 max-w-sm w-full shadow-2xl space-y-5 relative">
+                
+                <div className="text-center space-y-1">
+                    <h3 className="text-white font-bold text-lg leading-tight">Unlock Today&apos;s NBA Steamers (Daily)</h3>
+                    <p className="text-blue-400 font-mono font-bold text-lg">£20 / week</p>
+                </div>
+
+                <div className="bg-[#0B1120] p-4 rounded-lg text-sm text-slate-300 space-y-3 border border-slate-800">
+                    <p className="leading-relaxed">
+                        <span className="font-bold text-white">1) Pay £20 on Revolut:</span><br/> 
+                        <a href="https://revolut.me/gerardq0w5" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline break-all">
+                            revolut.me/gerardq0w5
+                        </a>
+                    </p>
+                    <p className="leading-relaxed">
+                        <span className="font-bold text-white">2) Then DM @NBA_steamers with:</span>
+                        <span className="block text-slate-400 pl-3 mt-1 text-xs">• your email</span>
+                        <span className="block text-slate-400 pl-3 text-xs">• a screenshot of payment</span>
+                    </p>
+                    <p className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-800/50">
+                        Access is granted manually.
+                    </p>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-2">
+                    <button 
+                        onClick={handleConfirmPayment} 
+                        className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg w-full transition-all shadow-lg border border-blue-500/50"
+                    >
+                        I’VE PAID — UNLOCK
+                    </button>
+                    <button 
+                        onClick={() => setShowPaymentModal(false)} 
+                        className="text-slate-500 hover:text-white font-medium text-xs py-2 uppercase tracking-wide transition-colors"
+                    >
+                        Not now
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
     </div>
   );
 }
