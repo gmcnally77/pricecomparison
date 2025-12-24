@@ -474,15 +474,16 @@ export default function Home() {
                                             {isPaywalled && (
                                                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/20 backdrop-blur-[1px] rounded-lg">
                                                     <div className="flex flex-col items-center gap-1.5 p-2">
-                                                        <span className="text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1">
-                                                            <Lock size={10} className="text-yellow-400" /> Unlock Steamers
-                                                        </span>
                                                         <button 
                                                             onClick={handleUnlock}
-                                                            className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-3 py-1 rounded shadow-lg border border-blue-400/50 transition-all flex items-center gap-1"
+                                                            className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-4 py-2 rounded shadow-lg border border-blue-400/50 transition-all flex items-center gap-2"
                                                         >
-                                                            UNLOCK <Unlock size={10} />
+                                                            <Lock size={12} className="text-yellow-400" />
+                                                            Unlock Today&apos;s NBA Steamers
                                                         </button>
+                                                        <span className="text-[9px] text-slate-400 font-medium mt-1">
+                                                            Pre-match only. No live chasing.
+                                                        </span>
                                                     </div>
                                                 </div>
                                             )}
