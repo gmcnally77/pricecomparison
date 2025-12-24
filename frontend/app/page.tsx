@@ -248,7 +248,7 @@ export default function Home() {
                     </div>
                     <div className="flex flex-col">
                         <span className="block text-lg font-bold text-white leading-none">
-                            NBA PRE-MATCH<span className="text-blue-500 text-xs ml-1 tracking-widest">STEAMERS (DAILY)</span>
+                            NBA Pre-Match Steamers <span className="text-blue-500 text-xs ml-1 tracking-widest">(Daily)</span>
                         </span>
                     </div>
                     {!isPaid && (
@@ -261,9 +261,12 @@ export default function Home() {
             </div>
             
             {/* SUB-LABEL */}
-            <div className="mb-4 -mt-2">
-                <p className="text-[10px] md:text-xs text-slate-400 font-medium tracking-wide">
-                    Spot value where bookmakers are mispriced vs the exchange.
+            <div className="mb-4 -mt-2 space-y-1">
+                <p className="text-[10px] md:text-xs text-slate-300 font-medium tracking-wide">
+                    Pre-match only · Moneyline · Best bookmaker price vs exchange
+                </p>
+                <p className="text-[10px] text-slate-500">
+                    These are games where bookmakers are mispriced versus the exchange.
                 </p>
             </div>
 
