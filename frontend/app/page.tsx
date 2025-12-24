@@ -240,9 +240,11 @@ export default function Home() {
                     <div className="bg-blue-600/20 p-2 rounded-lg border border-blue-500/20">
                         <TrendingUp className="text-blue-500" size={20} />
                     </div>
-                    <span className="block text-lg font-bold text-white">
-                        INDEPENDENCE<span className="text-blue-500 text-xs ml-1 tracking-widest">STACK</span>
-                    </span>
+                    <div className="flex flex-col">
+                        <span className="block text-lg font-bold text-white leading-none">
+                            NBA PRE-MATCH<span className="text-blue-500 text-xs ml-1 tracking-widest">STEAMERS (DAILY)</span>
+                        </span>
+                    </div>
                     {!isPaid && (
                         <div className="ml-2 bg-red-500/10 border border-red-500/20 p-1.5 rounded text-red-400" title="Free Mode (Limited View)">
                             <Lock size={14} />
@@ -250,6 +252,13 @@ export default function Home() {
                     )}
                 </div>
                 <span className="text-xs font-mono text-slate-500 hidden sm:block">UPDATED: {lastUpdated}</span>
+            </div>
+            
+            {/* SUB-LABEL */}
+            <div className="mb-4 -mt-2">
+                <p className="text-[10px] md:text-xs text-slate-400 font-medium tracking-wide uppercase">
+                    Pre-match only <span className="text-slate-600 px-1">•</span> Moneyline <span className="text-slate-600 px-1">•</span> Best price vs exchange
+                </p>
             </div>
 
             <div className="flex gap-6 border-b border-transparent overflow-x-auto no-scrollbar">
