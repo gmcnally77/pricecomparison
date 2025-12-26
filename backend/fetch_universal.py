@@ -344,12 +344,8 @@ def run_spy():
             ttl = TTL_INPLAY_SECONDS      # Live (60s)
         elif min_seconds_away < 3600:     # < 1 Hour (Golden Hour)
             ttl = 120                     # 2 Minutes - Aggressive for team news
-        elif min_seconds_away < 10800:    # 1 - 3 Hours
-            ttl = 600                     # 10 Minutes - Relaxed
-        elif min_seconds_away < 43200:    # 3 - 12 Hours
-            ttl = 1800                    # 30 Minutes - Maintenance
-        else:                             # > 12 Hours
-            ttl = 1800                    # 30 Minutes - Deep Sleep (Accelerated)
+        else:                             # > 1 Hour (All Pre-Match)
+            ttl = 300                     # 5 Minutes - Maximum Fidelity
 
         data = fetch_cached_odds(sport['odds_api_key'], ttl_seconds=ttl)
 
