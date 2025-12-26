@@ -499,21 +499,22 @@ export default function Home() {
                                         <div className="relative w-full md:w-auto">
                                             {/* SCROLL REMOVED: Relies on parent container for sync */}
                                             <div className={`flex flex-wrap md:flex-nowrap md:items-center gap-2 ${isPaywalled ? 'blur-sm select-none opacity-40 pointer-events-none' : ''}`}>
-                                                <div className="flex gap-2 w-full md:w-auto md:gap-1 flex-shrink-0">
+                                                
+                                                {/* EXCHANGE GROUP + DIVIDER */}
+                                                <div className="flex gap-2 w-full md:w-auto md:pr-4 md:border-r md:border-slate-700/60 flex-shrink-0">
                                                     <div className="flex-1 md:w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-blue-500/30 flex flex-col justify-center h-[52px]">
-                                                    <span className="text-[9px] text-blue-500 font-bold uppercase mb-0.5">Back</span>
-                                                    <span className="text-lg font-mono font-bold text-blue-400 leading-none">
-                                                        {formatPrice(runner.exchange.back)}
-                                                    </span>
+                                                        <span className="text-[9px] text-blue-500 font-bold uppercase mb-0.5">Back</span>
+                                                        <span className="text-lg font-mono font-bold text-blue-400 leading-none">
+                                                            {formatPrice(runner.exchange.back)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex-1 md:w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-pink-500/30 flex flex-col justify-center h-[52px]">
+                                                        <span className="text-[9px] text-pink-500 font-bold uppercase mb-0.5">Lay</span>
+                                                        <span className="text-lg font-mono font-bold text-pink-400 leading-none">
+                                                            {formatPrice(runner.exchange.lay)}
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                                <div className="flex-1 md:w-16 py-2 rounded-lg text-center bg-[#0B1120] border border-pink-500/30 flex flex-col justify-center h-[52px]">
-                                                    <span className="text-[9px] text-pink-500 font-bold uppercase mb-0.5">Lay</span>
-                                                    <span className="text-lg font-mono font-bold text-pink-400 leading-none">
-                                                        {formatPrice(runner.exchange.lay)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <div className="hidden md:block w-px h-8 bg-slate-700 mx-1 flex-shrink-0"></div>
                                             
                                             {/* PINNACLE */}
                                             <div className="flex-1 md:w-16 py-2 rounded-lg text-center bg-[#ff7b00] border border-[#e66e00] flex flex-col justify-center h-[52px] flex-shrink-0">
