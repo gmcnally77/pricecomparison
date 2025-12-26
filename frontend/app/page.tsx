@@ -159,6 +159,15 @@ export default function Home() {
     const isTrialValid = trialStart && (Date.now() - parseInt(trialStart) < 24 * 60 * 60 * 1000);
     
     setIsPaid(paidStatus || !!isTrialValid);
+
+    // 📊 TRACKING: Log Page View
+    supabase.from('app_events').insert({ 
+        event: 'page_view',
+        metadata: { 
+            ua: typeof navigator !== 'undefined' ? navigator.userAgent : 'bot',
+            ref: typeof document !== 'undefined' ? document.referrer : ''
+        }
+    }).then(() => {});
   }, []);
 
   const handleUnlock = () => {
