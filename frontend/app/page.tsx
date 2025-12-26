@@ -122,9 +122,34 @@ export default function Home() {
   
   // PAYWALL STATE
   const [isPaid, setIsPaid] = useState(false);
+  const [trialTimeLeft, setTrialTimeLeft] = useState<string>('');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentRef, setPaymentRef] = useState('');
   const [copied, setCopied] = useState(false);
   
+ useEffect(() => {
+    const timer = setInterval(() => {
+        const start = typeof window !== 'undefined' ? localStorage.getItem('trial_start') : null;
+        const paidPerm = typeof window !== 'undefined' && localStorage.getItem('paid') === 'true';
+        
+        if (start && !paidPerm) {
+            const diff = (parseInt(start) + 24 * 60 * 60 * 1000) - Date.now();
+            if (diff <= 0) {
+                localStorage.removeItem('trial_start');
+                setIsPaid(false);
+                setTrialTimeLeft('');
+            } else {
+                const h = Math.floor(diff / 3600000);
+                const m = Math.floor((diff % 3600000) / 60000);
+                setTrialTimeLeft(`${h}h ${m}m remaining`);
+            }
+        } else {
+            setTrialTimeLeft('');
+        }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     // Check local storage on mount
     const paidStatus = typeof window !== 'undefined' && localStorage.getItem('paid') === 'true';
@@ -138,6 +163,7 @@ export default function Home() {
 
   const handleUnlock = () => {
     console.info("paywall_open");
+    setPaymentRef(`NBA-${Math.floor(1000 + Math.random() * 9000)}`);
     setShowPaymentModal(true);
   };
 
@@ -282,7 +308,14 @@ export default function Home() {
                         </div>
                     )}
                 </div>
-                <span className="text-xs font-mono text-slate-500 hidden sm:block">UPDATED: {lastUpdated}</span>
+                <div className="flex flex-col items-end gap-1">
+                    {trialTimeLeft && (
+                        <span className="text-[10px] md:text-xs font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20 animate-pulse whitespace-nowrap">
+                            Free Pass: {trialTimeLeft}
+                        </span>
+                    )}
+                    <span className="text-xs font-mono text-slate-500 hidden sm:block">UPDATED: {lastUpdated}</span>
+                </div>
             </div>
             
             {/* SUB-LABEL */}
@@ -577,6 +610,10 @@ export default function Home() {
                 <div className="bg-[#0B1120] p-4 rounded-lg text-sm text-slate-300 space-y-3 border border-slate-800 opacity-80 hover:opacity-100 transition-opacity">
                     <div className="leading-relaxed">
                         <span className="font-bold text-white block mb-1">1) Pay £5 on Revolut:</span>
+                        <div className="mb-2 bg-black/30 border border-slate-700/50 rounded px-2 py-1 inline-block">
+                            <span className="text-xs text-slate-400 mr-2">Payment Ref:</span>
+                            <span className="font-mono font-bold text-white select-all">{paymentRef}</span>
+                        </div>
                         <div className="flex items-center gap-2 flex-wrap">
                             <a href="https://revolut.me/gerardq0w5" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline break-all font-mono">
                                 revolut.me/gerardq0w5
