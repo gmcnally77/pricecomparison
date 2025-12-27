@@ -13,10 +13,14 @@ ALERT_COMMISSION = float(os.getenv("ALERT_COMMISSION", "0.02"))
 ALERT_MIN_VOLUME = float(os.getenv("ALERT_MIN_VOLUME", "200.0"))
 ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "600"))
 
+# NEW: STRICT STEAMER GATES
+ALERT_MIN_PRICE_ADVANTAGE = 0.02  # Bookie must be 2% higher than Lay (Raw Arb)
+ALERT_MAX_SPREAD = 0.04           # Exchange Spread must be < 4% (Tight/Efficient)
+
 # Guard: Only run logic if this mode is active
 SCOPE_MODE = os.getenv("SCOPE_MODE", "NBA_PREMATCH_ML_STEAMERS")
 
-# Local persistence for dedupe (Safe on Droplet)
+# Local persistence for dedupe
 DB_FILE = os.path.join(os.path.dirname(__file__), "alerts.db")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - ALERTS - %(levelname)s - %(message)s')
@@ -132,6 +136,7 @@ def send_status_report():
         f"<b>🤖 Independence Bot Status</b>\n"
         f"✅ Mode: {SCOPE_MODE}\n"
         f"📊 Alerts (1h): {count}\n"
+        f"🎯 Threshold: {ALERT_MIN_PRICE_ADVANTAGE*100}% Gap\n"
         f"🕒 UTC: {datetime.now(timezone.utc).strftime('%H:%M:%S')}"
     )
     send_telegram_message(msg)
@@ -209,14 +214,37 @@ def run_alert_cycle(supabase_client):
                 pass 
 
         # Price Logic
-        # Note: In your DB, 'price_bet365' is populated with Ladbrokes data per your config comment
         p_paddy = float(row.get('price_paddy') or 0)
         p_ladbrokes = float(row.get('price_bet365') or 0) 
         
         book_price = max(p_paddy, p_ladbrokes)
         lay_price = float(row.get('lay_price') or 0)
+        back_price = float(row.get('back_price') or 0)
 
-        # Edge Calc
+        # --- STRICT STEAMER GATES (NEW) ---
+
+        # 1. GATE: Market Tightness (Is the Exchange 100% efficient?)
+        # We assume "100% book" maps to a tight spread.
+        # If Spread > 4%, market is too loose/illiquid to trust.
+        if back_price <= 1.01 or lay_price <= 1.01:
+            continue
+            
+        spread_pct = (lay_price - back_price) / back_price
+        if spread_pct > ALERT_MAX_SPREAD:
+            # e.g. Back 2.50 / Lay 2.80 -> Spread 12% -> IGNORED
+            continue
+
+        # 2. GATE: Raw Price Advantage (Steamer Check)
+        # Bookie must be HIGHER than Exchange Lay by 2% (Real Arb)
+        price_diff_pct = (book_price - lay_price) / lay_price
+        if price_diff_pct < ALERT_MIN_PRICE_ADVANTAGE:
+            # e.g. Book 2.55 vs Lay 2.58 -> diff is negative -> IGNORED
+            # e.g. Book 2.65 vs Lay 2.58 -> diff is +2.7% -> PASSED
+            continue
+
+        # -----------------------------------
+
+        # Edge Calc (Commission Adjusted)
         edge = calculate_edge(book_price, lay_price)
         
         if edge >= ALERT_EDGE_THRESHOLD:
@@ -227,13 +255,17 @@ def run_alert_cycle(supabase_client):
             if should_alert(runner_key, edge, book_price, lay_price):
                 runner_name = row.get('runner_name', 'Unknown')
                 bookie_name = "PaddyPower" if p_paddy >= p_ladbrokes else "Ladbrokes"
+                
+                # Format for display
                 edge_pct = round(edge * 100, 2)
+                raw_diff = round(price_diff_pct * 100, 2)
+                spread_display = round(spread_pct * 100, 1)
                 
                 msg = (
                     f"🔥 <b>NBA STEAMER: {runner_name}</b>\n\n"
-                    f"🚀 <b>Edge: +{edge_pct}%</b>\n"
+                    f"🚀 <b>Gap: +{raw_diff}%</b> (Edge {edge_pct}%)\n"
                     f"🏦 {bookie_name}: <b>{book_price}</b>\n"
-                    f"🔄 Exchange Lay: <b>{lay_price}</b>\n"
+                    f"🔄 Exchange: <b>{back_price} / {lay_price}</b> ({spread_display}% spr)\n"
                     f"💰 Vol: £{int(vol)}\n"
                     f"⏰ {start_time_str}"
                 )
