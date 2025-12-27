@@ -712,8 +712,8 @@ def fetch_betfair():
             logger.error(f"Database Error: {e}")
 
 if __name__ == "__main__":
-    logger.info("🚀 AUTOMATION VERIFIED: The pipeline is working!") 
-    logger.info("--- STARTING UNIVERSAL ENGINE (PROXIMITY OPTIMIZED + TIMEOUT) ---")
+    logger.info("🔥 PROOF OF PIPELINE: UPDATED AT 04:55 🔥") # <--- Change this text
+    logger.info("--- STARTING UNIVERSAL ENGINE ---")
     run_spy()
     
     last_keep_alive = time.time()
