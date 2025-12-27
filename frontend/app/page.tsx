@@ -270,7 +270,19 @@ export default function Home() {
       try {
           const grouped = groupData(activeRows);
           setCompetitions(grouped);
-          setLastUpdated(new Date().toLocaleTimeString());
+          
+          // CALCULATE LAST API CALL: Find the most recent timestamp in the data
+          const latestTs = activeRows.reduce((max: number, r: any) => {
+              const ts = r.last_updated ? new Date(r.last_updated).getTime() : 0;
+              return ts > max ? ts : max;
+          }, 0);
+
+          // Update UI with the actual data time (fallback to now if data is empty)
+          if (latestTs > 0) {
+              setLastUpdated(new Date(latestTs).toLocaleTimeString());
+          } else {
+              setLastUpdated(new Date().toLocaleTimeString());
+          }
       } catch (e) { console.error(e); }
     }
     setLoading(false);
