@@ -14,33 +14,38 @@ ALERT_MIN_VOLUME = float(os.getenv("ALERT_MIN_VOLUME", "200.0"))
 ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "600"))
 
 # NEW: STRICT STEAMER GATES
-ALERT_MIN_PRICE_ADVANTAGE = 0.02  # Bookie must be 2% higher than Lay (Raw Arb)
-ALERT_MAX_SPREAD = 0.04           # Exchange Spread must be < 4% (Tight/Efficient)
+ALERT_MIN_PRICE_ADVANTAGE = 0.02  # Bookie must be 2% higher than Lay
+ALERT_MAX_SPREAD = 0.04           # Exchange Spread must be < 4%
 
 # Guard: Only run logic if this mode is active
 SCOPE_MODE = os.getenv("SCOPE_MODE", "NBA_PREMATCH_ML_STEAMERS")
 
-# Local persistence for dedupe
-DB_FILE = os.path.join(os.path.dirname(__file__), "alerts.db")
+# --- DATABASE PATH FIX ---
+# Force DB to be absolute so it doesn't get lost or hit permission errors
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "alerts.db")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - ALERTS - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- SQLITE DEDUPE STORE ---
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS alert_history (
-            id TEXT PRIMARY KEY,
-            last_alert_time REAL,
-            last_edge REAL,
-            last_book_price REAL,
-            last_lay_price REAL
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS alert_history (
+                id TEXT PRIMARY KEY,
+                last_alert_time REAL,
+                last_edge REAL,
+                last_book_price REAL,
+                last_lay_price REAL
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"CRITICAL: Cannot Create DB at {DB_FILE}. Error: {e}")
 
 def get_last_alert(runner_key):
     try:
@@ -66,21 +71,18 @@ def update_alert_history(runner_key, edge, book_price, lay_price):
         ''', (runner_key, now, edge, book_price, lay_price))
         conn.commit()
         conn.close()
+        # Log success so we know memory is working
+        logger.info(f"✅ Alert saved to memory: {runner_key}")
     except Exception as e:
-        logger.error(f"DB Write Error: {e}")
+        logger.error(f"❌ DB Write Failed! Alerts will duplicate. Error: {e}")
 
 # --- TELEGRAM BOT UTILS ---
 def send_telegram_message(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("Telegram credentials missing. Skipping message.")
         return False
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
+    payload = { "chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML" }
     try:
         r = requests.post(url, json=payload, timeout=5)
         return r.status_code == 200
@@ -89,20 +91,12 @@ def send_telegram_message(text):
         return False
 
 def check_bot_commands():
-    """
-    Simple polling for /status. 
-    """
-    if not TELEGRAM_BOT_TOKEN:
-        return
-
+    if not TELEGRAM_BOT_TOKEN: return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
     try:
-        # Short timeout to not block the main loop
         r = requests.get(url, params={"offset": -1, "timeout": 1}, timeout=3)
         data = r.json()
-        
-        if not data.get("ok"):
-            return
+        if not data.get("ok"): return
 
         for result in data.get("result", []):
             update_id = result.get("update_id")
@@ -110,13 +104,10 @@ def check_bot_commands():
             text = msg.get("text", "")
             chat_id = msg.get("chat", {}).get("id")
             
-            # Security: Only reply to the Admin
-            if str(chat_id) != str(TELEGRAM_CHAT_ID):
-                continue
+            if str(chat_id) != str(TELEGRAM_CHAT_ID): continue
 
             if text.strip() == "/status":
                 send_status_report()
-                # Acknowledge update
                 requests.get(url, params={"offset": update_id + 1})
     except Exception:
         pass 
@@ -124,8 +115,8 @@ def check_bot_commands():
 def send_status_report():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    hour_ago = time.time() - 3600
     try:
+        hour_ago = time.time() - 3600
         c.execute("SELECT count(*) FROM alert_history WHERE last_alert_time > ?", (hour_ago,))
         count = c.fetchone()[0]
     except:
@@ -136,7 +127,7 @@ def send_status_report():
         f"<b>🤖 Independence Bot Status</b>\n"
         f"✅ Mode: {SCOPE_MODE}\n"
         f"📊 Alerts (1h): {count}\n"
-        f"🎯 Threshold: {ALERT_MIN_PRICE_ADVANTAGE*100}% Gap\n"
+        f"📂 DB Path: {DB_FILE}\n"
         f"🕒 UTC: {datetime.now(timezone.utc).strftime('%H:%M:%S')}"
     )
     send_telegram_message(msg)
@@ -145,45 +136,26 @@ def send_status_report():
 def calculate_edge(book_odds, lay_odds):
     if not book_odds or not lay_odds or book_odds <= 1.01 or lay_odds <= 1.01:
         return -1.0
-    
     implied_back = 1.0 / book_odds
-    # Formula: implied_lay_net = 1 / (lay_odds * (1 - commission))
     implied_lay_net = 1.0 / (lay_odds * (1.0 - ALERT_COMMISSION))
-    
-    edge = implied_lay_net - implied_back
-    return edge
+    return implied_lay_net - implied_back
 
 def should_alert(runner_key, edge, book_price, lay_price):
     last = get_last_alert(runner_key)
-    
-    if not last:
-        return True # First alert
+    if not last: return True
     
     _, last_ts, last_edge, last_book, last_lay = last
-    
-    # 1. Edge improves by +0.2%
-    if edge >= (last_edge + 0.002):
-        return True
-        
-    # 2. Cooldown expired (> 10 mins)
-    if (time.time() - last_ts) > ALERT_COOLDOWN_SECONDS:
-        return True
-        
-    # 3. Price moved significantly (>= 0.03)
-    if abs(book_price - last_book) >= 0.03 or abs(lay_price - last_lay) >= 0.03:
-        return True
-        
+    if edge >= (last_edge + 0.002): return True
+    if (time.time() - last_ts) > ALERT_COOLDOWN_SECONDS: return True
+    if abs(book_price - last_book) >= 0.03 or abs(lay_price - last_lay) >= 0.03: return True
     return False
 
 def run_alert_cycle(supabase_client):
-    """
-    Main entry point called by fetch_universal.py
-    """
     init_db()
     check_bot_commands()
 
-    # Fetch OPEN, Not In Play markets
     try:
+        # Fetch OPEN, Not In Play markets
         response = supabase_client.table("market_feed") \
             .select("*") \
             .eq("market_status", "OPEN") \
@@ -197,54 +169,32 @@ def run_alert_cycle(supabase_client):
     alerts_sent = 0
 
     for row in rows:
-        # Liquidity Filter
         vol = row.get('volume')
-        if vol is None or vol < ALERT_MIN_VOLUME:
-            continue
+        if vol is None or vol < ALERT_MIN_VOLUME: continue
 
-        # Time Filter (Pre-match only)
         start_time_str = row.get('start_time')
         if start_time_str:
             try:
-                # Handle ISO 8601 string
                 start_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) >= start_dt:
-                    continue 
-            except:
-                pass 
+                if datetime.now(timezone.utc) >= start_dt: continue 
+            except: pass 
 
-        # Price Logic
         p_paddy = float(row.get('price_paddy') or 0)
-        p_ladbrokes = float(row.get('price_bet365') or 0) 
-        
+        p_ladbrokes = float(row.get('price_bet365') or 0)
         book_price = max(p_paddy, p_ladbrokes)
         lay_price = float(row.get('lay_price') or 0)
         back_price = float(row.get('back_price') or 0)
 
-        # --- STRICT STEAMER GATES (NEW) ---
-
-        # 1. GATE: Market Tightness (Is the Exchange 100% efficient?)
-        # We assume "100% book" maps to a tight spread.
-        # If Spread > 4%, market is too loose/illiquid to trust.
-        if back_price <= 1.01 or lay_price <= 1.01:
-            continue
+        # --- STRICT STEAMER GATES ---
+        if back_price <= 1.01 or lay_price <= 1.01: continue
             
         spread_pct = (lay_price - back_price) / back_price
-        if spread_pct > ALERT_MAX_SPREAD:
-            # e.g. Back 2.50 / Lay 2.80 -> Spread 12% -> IGNORED
-            continue
+        if spread_pct > ALERT_MAX_SPREAD: continue
 
-        # 2. GATE: Raw Price Advantage (Steamer Check)
-        # Bookie must be HIGHER than Exchange Lay by 2% (Real Arb)
         price_diff_pct = (book_price - lay_price) / lay_price
-        if price_diff_pct < ALERT_MIN_PRICE_ADVANTAGE:
-            # e.g. Book 2.55 vs Lay 2.58 -> diff is negative -> IGNORED
-            # e.g. Book 2.65 vs Lay 2.58 -> diff is +2.7% -> PASSED
-            continue
+        if price_diff_pct < ALERT_MIN_PRICE_ADVANTAGE: continue
+        # -----------------------------
 
-        # -----------------------------------
-
-        # Edge Calc (Commission Adjusted)
         edge = calculate_edge(book_price, lay_price)
         
         if edge >= ALERT_EDGE_THRESHOLD:
@@ -255,17 +205,14 @@ def run_alert_cycle(supabase_client):
             if should_alert(runner_key, edge, book_price, lay_price):
                 runner_name = row.get('runner_name', 'Unknown')
                 bookie_name = "PaddyPower" if p_paddy >= p_ladbrokes else "Ladbrokes"
-                
-                # Format for display
                 edge_pct = round(edge * 100, 2)
                 raw_diff = round(price_diff_pct * 100, 2)
-                spread_display = round(spread_pct * 100, 1)
                 
                 msg = (
                     f"🔥 <b>NBA STEAMER: {runner_name}</b>\n\n"
                     f"🚀 <b>Gap: +{raw_diff}%</b> (Edge {edge_pct}%)\n"
                     f"🏦 {bookie_name}: <b>{book_price}</b>\n"
-                    f"🔄 Exchange: <b>{back_price} / {lay_price}</b> ({spread_display}% spr)\n"
+                    f"🔄 Exchange: <b>{back_price} / {lay_price}</b>\n"
                     f"💰 Vol: £{int(vol)}\n"
                     f"⏰ {start_time_str}"
                 )
